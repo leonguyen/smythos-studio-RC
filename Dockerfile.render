@@ -1,0 +1,3 @@
+# Install and configure MySQL (for single-container deployment)
+RUN apk add --no-cache mysql mysql-client
+COPY my.cnf /etc/mysql/my.cnf

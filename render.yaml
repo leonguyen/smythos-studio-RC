@@ -1,0 +1,107 @@
+# render.yaml - SmythOS Studio Deployment Configuration
+version: "1"
+services:
+  # Main SmythOS Studio Service (App + Runtime)
+  - type: web
+    name: smythos-studio
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    env: docker
+    envVars:
+      # Database Configuration (Using Render PostgreSQL instead of MySQL for managed service)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smythos-db
+          property: connectionString
+      # Override for PostgreSQL compatibility (requires code changes or use MySQL)
+      # Alternative: Use external MySQL service
+      
+      # Redis Configuration (Using Render Redis)
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: smythos-redis
+          property: connectionString
+      
+      # Application Domains
+      - key: APP_DOMAIN
+        value: smythos-studio.onrender.com
+      - key: APP_URL
+        value: https://smythos-studio.onrender.com
+      - key: RUNTIME_DOMAIN
+        value: runtime-smythos.onrender.com
+      - key: RUNTIME_URL
+        value: https://runtime-smythos.onrender.com
+      - key: DEFAULT_AGENT_DOMAIN
+        value: agents-dev-smythos.onrender.com
+      - key: PROD_AGENT_DOMAIN
+        value: agents-prod-smythos.onrender.com
+      
+      # Security
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+      
+      # API Keys (Set these manually in Render Dashboard after deployment)
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SMYTHOS_EDITION
+        value: self-hosted
+      
+      # Ports
+      - key: APP_PORT
+        value: "5050"
+      - key: RUNTIME_PORT
+        value: "5053"
+      - key: PORT
+        value: "5050"  # Render requires PORT env var
+    
+    # Health check paths
+    healthCheckPath: /health
+    # Note: Runtime health check on port 5053 will need separate handling
+    
+    # Scaling
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - packages/**
+        - package.json
+        - pnpm-lock.yaml
+        - Dockerfile.render
+
+  # Optional: Separate Runtime Service (for scaling)
+  - type: web
+    name: smythos-runtime
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./Dockerfile.runtime
+    dockerContext: .
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: smythos-redis
+          property: connectionString
+      - key: RUNTIME_PORT
+        value: "5053"
+      - key: NODE_ENV
+        value: production
+    autoDeploy: true
+
+# Managed PostgreSQL Database (Note: Requires code changes for PostgreSQL support)
+# OR use MySQL via Docker in the same service (see Dockerfile.render)
+databases:
+  - name: smythos-db
+    databaseName: smythos
+    user: smythos
+    plan: standard
+
+# Managed Redis
+redis:
+  - name: smythos-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # Allow all (internal only)

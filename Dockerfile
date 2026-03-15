@@ -1,65 +1,60 @@
-# Use Node.js 22 Alpine as base image
+# Dockerfile.render - Optimized for Render.com deployment
 FROM node:22-alpine
 
-# Install necessary packages and SSL libraries for Prisma
+# Install necessary packages including MySQL client for Prisma
 RUN apk add --no-cache \
     openssl \
     openssl-dev \
     libc6-compat \
     ca-certificates \
-    curl
+    curl \
+    mysql-client \
+    mysql-dev
 
 # Set working directory
 WORKDIR /app
 
-# Copy root package files
+# Copy package files first for better caching
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-
-# Copy TypeScript config
 COPY tsconfig.json ./
 
-# Install pnpm globally
+# Install pnpm
 RUN npm install -g pnpm@10.12.2
 
-# Set environment for Prisma to use the correct binary
-# ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x"
+# Copy source code
+COPY packages/ ./packages/
 
-# Copy all package source code
-COPY packages/ ./packages/  
-
-# Install dependencies for all packages
+# Install dependencies and build
 RUN pnpm install --frozen-lockfile && \
-    pnpm store prune && \
-    rm -rf /root/.pnpm-store /root/.cache /root/.npm /tmp/*
+    pnpm run build && \
+    pnpm store prune
 
-# Build all packages
-RUN pnpm run build
-
-# Patch the app to bind to 0.0.0.0 instead of localhost
-# WORKDIR /app/packages/app
-# RUN sed -i 's/listen(PORT, "localhost",/listen(PORT, process.env.HOST || "0.0.0.0",/g' dist/server/index.js
-
-
-
-# Generate Prisma client for Alpine Linux with correct binary target
+# Generate Prisma client for Alpine
 WORKDIR /app/packages/middleware
-# RUN PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x" pnpm run prisma:generate
 RUN pnpm run prisma:generate
 
-RUN mkdir -p /home/node/smythos-data && echo '{}' > /home/node/smythos-data/vault.json
-
-COPY docker-entrypoint.sh /app/start.sh
-RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
-
-# Change ownership of app directory to node user (excluding node_modules for performance)
-RUN find /app -not -path "*/node_modules/*" -exec chown node:node {} + && \
+# Create data directory
+RUN mkdir -p /home/node/smythos-data/.smyth/models && \
+    echo '{}' > /home/node/smythos-data/vault.json && \
     chown -R node:node /home/node
-
-# Expose app port + runtime port
-EXPOSE 5050 5053
 
 # Switch to node user
 USER node
 
-# Start the application
+# Set environment
+ENV NODE_ENV=production
+ENV DOCKER_CONTAINER=true
+ENV HOST=0.0.0.0
+
+# Expose the required ports (Render uses PORT env var)
+EXPOSE 5050 5053
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:5050/health || exit 1
+
+# Start script that handles both services
+COPY --chown=node:node render-start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 CMD ["/app/start.sh"]
